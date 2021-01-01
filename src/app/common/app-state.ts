@@ -16,12 +16,14 @@ export type SupportedLanguage =
 | 'ja'
 | 'ko'
 | 'ms'
+| 'nl'
+| 'pl'
 | 'pt'
 | 'ru'
-| 'zh'
+| 'tr'
 | 'uk'
 | 'vi'
-| 'tr';
+| 'zh';
 
 export interface RowNumbers {
   thumbnailSheet: number;
@@ -44,6 +46,7 @@ export const DefaultImagesPerRow: RowNumbers = {
 };
 
 export const AppState: AppStateInterface = { // AppState is saved into `settings.json` so it persists
+  addtionalExtensions: '',
   currentSort: 'default',
   currentVhaFile: '',  // full path to the .vha2 file -- TODO: rename to `currentVhaFilePath` in VHA3
   currentView: 'showThumbnails',
@@ -53,14 +56,15 @@ export const AppState: AppStateInterface = { // AppState is saved into `settings
   language: 'en',
   menuHidden: false,
   numOfFolders: 0,
+  port: 3000,
   preferredVideoPlayer: '',
-  videoPlayerArgs: '',
-  addtionalExtensions: '',
   selectedOutputFolder: '',
-  sortTagsByFrequency: false
+  sortTagsByFrequency: false,
+  videoPlayerArgs: '',
 };
 
 export interface AppStateInterface {
+  addtionalExtensions: string;
   currentSort: SortType;
   currentVhaFile: string;
   currentView: SupportedView;
@@ -70,9 +74,9 @@ export interface AppStateInterface {
   language: SupportedLanguage;
   menuHidden: boolean;
   numOfFolders: number;
+  port: number;
   preferredVideoPlayer: string;
-  videoPlayerArgs: string;
-  addtionalExtensions: string;
   selectedOutputFolder: string;
   sortTagsByFrequency: boolean; // when `false` sort tags alphabetically
+  videoPlayerArgs: string;
 }

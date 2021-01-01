@@ -1,12 +1,17 @@
 import { Pipe, PipeTransform } from '@angular/core';
 import { ImageElement, StarRating } from '../../../interfaces/final-object.interface';
 import { randomizeArray } from '../../../node/utility';
+import { orderBy } from 'natural-orderby';
 
 export type SortType = 'default'
                      | 'alphabetAsc'
                      | 'alphabetDesc'
+                     | 'alphabetAsc2'
+                     | 'alphabetDesc2'
                      | 'aspectRatioAsc'
                      | 'aspectRatioDesc'
+                     | 'folderSizeAsc'
+                     | 'folderSizeDesc'
                      | 'hash' // only used by the duplicateFinderPipe
                      | 'modifiedAsc'
                      | 'modifiedDesc'
@@ -116,10 +121,36 @@ export class SortingPipe implements PipeTransform {
       }
     }
 
-    if (decreasing) {
-      return (x[property]) - (y[property]);
+    if (property === 'folderSize') {
+
+      // want non-folders to be considered "less than" a folder so give negative value by default.
+      var xDisplay = -Infinity;
+      var yDisplay = -Infinity;
+
+      if(x.cleanName === "*FOLDER*"){
+        xDisplay = parseInt(x.fileSizeDisplay, 10);
+      }
+
+      if(y.cleanName === "*FOLDER*"){
+        yDisplay = parseInt(y.fileSizeDisplay, 10);
+      }
+
+      if (xDisplay < yDisplay ) {
+        return decreasing ? 1 : -1;
+      } if (xDisplay > yDisplay) {
+        return decreasing ? -1 : 1;
+      } else {
+        return 0;
+      }
+
+    }
+
+    if (x[property] > y[property]) {
+      return decreasing ? 1 : -1;
+    } else if (x[property] === y[property]) {
+      return 0;
     } else {
-      return (y[property]) - (x[property]);
+      return decreasing ? -1 : 1;
     }
 
   }
@@ -154,6 +185,9 @@ export class SortingPipe implements PipeTransform {
 
       return randomizeArray(galleryArray, currentIndex);
 
+    } else if (sortingType === 'default') {
+      return galleryArray; // sorting order set via `alphabetizeFinalArray` in `main-support.ts`
+      // no need to `.slice()` as all other sorting types do it
     } else if (sortingType === 'alphabetAsc') {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
         return this.sortFunctionLol(x, y, 'alphabetical', true);
@@ -162,6 +196,22 @@ export class SortingPipe implements PipeTransform {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
         return this.sortFunctionLol(x, y, 'alphabetical', false);
       });
+    } else if (sortingType === 'alphabetAsc2') {
+      if (galleryArray.length && galleryArray[0].fileName === '*UP*') {
+        const tempGallery: ImageElement[] = galleryArray.slice();
+        const tempUp: ImageElement = tempGallery.shift(); // remove the first element (*UP*)
+        return [tempUp, ...orderBy(tempGallery, 'fileName', 'asc')];
+      } else {
+        return orderBy(galleryArray, 'fileName', 'asc');
+      }
+    } else if (sortingType === 'alphabetDesc2') {
+      if (galleryArray.length && galleryArray[0].fileName === '*UP*') {
+        const tempGallery: ImageElement[] = galleryArray.slice();
+        const tempUp: ImageElement = tempGallery.shift(); // remove the first element (*UP*)
+        return [tempUp, ...orderBy(tempGallery, 'fileName', 'desc')];
+      } else {
+        return orderBy(galleryArray, 'fileName', 'desc');
+      }
     } else if (sortingType === 'sizeAsc') {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
         return this.sortFunctionLol(x, y, 'fileSize', true);
@@ -212,11 +262,11 @@ export class SortingPipe implements PipeTransform {
       });
     } else if (sortingType === 'createdAsc') {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
-        return this.sortFunctionLol(x, y, 'ctime', true);
+        return this.sortFunctionLol(x, y, 'birthtime', true);
       });
     } else if (sortingType === 'createdDesc') {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
-        return this.sortFunctionLol(x, y, 'ctime', false);
+        return this.sortFunctionLol(x, y, 'birthtime', false);
       });
     } else if (sortingType === 'hash') {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
@@ -238,12 +288,18 @@ export class SortingPipe implements PipeTransform {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
         return this.sortFunctionLol(x, y, 'aspectRatio', true);
       });
+    } else if (sortingType === 'folderSizeAsc') {
+      return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
+        return this.sortFunctionLol(x, y, 'folderSize', false);
+      });
+    } else if (sortingType === 'folderSizeDesc') {
+      return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
+        return this.sortFunctionLol(x, y, 'folderSize', true);
+      });
     } else {
       return galleryArray.slice().sort((x: ImageElement, y: ImageElement): any => {
         return this.sortFunctionLol(x, y, 'index', true);
       });
     }
-
   }
-
 }

@@ -1,10 +1,7 @@
+// Update the `demo` and `version` when building
 import { GLOBALS } from './node/main-globals';
-// =================================================================================================
-// -------------------------------------     BUILD TOGGLE     --------------------------------------
-// -------------------------------------------------------------------------------------------------
-const demo = false; // TODO: add this back into code
-GLOBALS.version = '3.0.0';   // update `package.json` version to `#.#.#-demo` when building the demo
-// =================================================================================================
+
+GLOBALS.macVersion = process.platform === 'darwin';
 
 import * as path from 'path';
 import * as url from 'url';
@@ -16,6 +13,7 @@ const windowStateKeeper = require('electron-window-state');
 
 // Methods
 import { createTouchBar } from './node/main-touch-bar';
+import { setUpIpcForServer } from './node/server';
 import { setUpIpcMessages } from './node/main-ipc';
 import { sendFinalObjectToAngular, setUpDirectoryWatchers, upgradeToVersion3, writeVhaFileToDisk, parseAdditionalExtensions } from './node/main-support';
 
@@ -23,14 +21,13 @@ import { sendFinalObjectToAngular, setUpDirectoryWatchers, upgradeToVersion3, wr
 import { FinalObject } from './interfaces/final-object.interface';
 import { SettingsObject } from './interfaces/settings-object.interface';
 import { WizardOptions } from './interfaces/wizard-options.interface';
-import { stopThumbExtraction } from './node/main-extract-async';
+import { preventSleep, resetAllQueues } from './node/main-extract-async';
 
 // Variables
 const pathToAppData = app.getPath('appData');
 const pathToPortableApp = process.env.PORTABLE_EXECUTABLE_DIR;
 GLOBALS.settingsPath = pathToPortableApp ? pathToPortableApp : path.join(pathToAppData, 'video-hub-app-2');
 
-const codeRunningOnMac: boolean = process.platform === 'darwin';
 const English = require('./i18n/en.json');
 let systemMessages = English.SYSTEM; // Set English as default; update via `system-messages-updated`
 
@@ -45,10 +42,10 @@ electron.Menu.setApplicationMenu(null);
 
 // =================================================================================================
 
-let win, serve;
+let win;
 let myWindow = null;
 const args = process.argv.slice(1);
-serve = args.some(val => val === '--serve');
+const serve: boolean = args.some(val => val === '--serve');
 
 GLOBALS.debug = args.some(val => val === '--debug');
 if (GLOBALS.debug) { console.log('Debug mode enabled!'); }
@@ -136,7 +133,7 @@ function createWindow() {
     }));
   }
 
-  if (codeRunningOnMac) {
+  if (GLOBALS.macVersion) {
     const touchBar = createTouchBar();
     if (touchBar) {
       win.setTouchBar(touchBar);
@@ -199,7 +196,7 @@ try {
 
 } catch {}
 
-if (codeRunningOnMac) {
+if (GLOBALS.macVersion) {
   systemPreferences.subscribeNotification(
     'AppleInterfaceThemeChangedNotification',
     function theThemeHasChanged () {
@@ -230,7 +227,7 @@ function tellElectronDarkModeChange(mode: string) {
  */
 function openThisDamnFile(pathToVhaFile: string) {
 
-  stopThumbExtraction(); // todo -- rename to "reset task runners" and reset all that jazz
+  resetAllQueues();
 
   macFirstRun = false;     // TODO - figure out how to open file when double click first time on Mac
 
@@ -271,6 +268,8 @@ function openThisDamnFile(pathToVhaFile: string) {
 
 setUpIpcMessages(ipcMain, win, pathToAppData, systemMessages);
 
+setUpIpcForServer(ipcMain);
+
 /**
  * Once Angular loads it sends over the `ready` status
  * Load up the settings.json and send settings over to Angular
@@ -279,7 +278,7 @@ ipcMain.on('just-started', (event) => {
   GLOBALS.angularApp = event;
   GLOBALS.winRef = win;
 
-  if (codeRunningOnMac) {
+  if (GLOBALS.macVersion) {
     tellElectronDarkModeChange(systemPreferences.getEffectiveAppearance());
   }
 
@@ -307,6 +306,9 @@ ipcMain.on('just-started', (event) => {
  * Start extracting the screenshots into a chosen output folder from a chosen input folder
  */
 ipcMain.on('start-the-import', (event, wizard: WizardOptions) => {
+
+  preventSleep();
+
   const hubName = wizard.futureHubName;
   const outDir: string = wizard.selectedOutputFolder;
 
@@ -414,7 +416,8 @@ ipcMain.on('load-this-vha-file', (event, pathToVhaFile: string, finalObjectToSav
  * Interrupt current import process
  */
 ipcMain.on('cancel-current-import', (event): void => {
-  stopThumbExtraction();
+  GLOBALS.winRef.setProgressBar(-1);
+  resetAllQueues();
 });
 
 /**

@@ -1,5 +1,4 @@
 import { BrowserWindow } from 'electron';
-const { powerSaveBlocker } = require('electron');
 const dialog = require('electron').dialog;
 const shell = require('electron').shell;
 
@@ -14,8 +13,6 @@ import { SettingsObject } from '../interfaces/settings-object.interface';
 import { createDotPlsFile, writeVhaFileToDisk } from './main-support';
 import { replaceThumbnailWithNewImage } from './main-extract';
 import { closeWatcher, startWatcher, extractAnyMissingThumbs, removeThumbnailsNotInHub } from './main-extract-async';
-
-let preventSleepId: number;
 
 /**
  * Set up the listeners
@@ -45,22 +42,6 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
   });
 
   /**
-   * Prevent PC from going to sleep during screenshot extraction
-   */
-  ipc.on('prevent-sleep', (event) => {
-    console.log('preventing sleep');
-    preventSleepId = powerSaveBlocker.start('prevent-app-suspension');
-  });
-
-  /**
-   * Allow PC to go to sleep after screenshots were extracted
-   */
-  ipc.on('allow-sleep', (event) => {
-    console.log('allowing sleep');
-    powerSaveBlocker.stop(preventSleepId);
-  });
-
-  /**
    * Open the explorer to the relevant file
    */
   ipc.on('open-in-explorer', (event, fullPath: string) => {
@@ -87,28 +68,42 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
    * Open a particular video file clicked inside Angular
    */
   ipc.on('open-media-file', (event, fullFilePath) => {
-    shell.openItem(path.normalize(fullFilePath)); // normalize because on windows, the path sometimes is mixing `\` and `/`
-    // shell.openPath(path.normalize(fullFilePath)); // Electron 9
+    fs.access(fullFilePath, fs.constants.F_OK, (err: any) => {
+      if (!err) {
+        shell.openItem(path.normalize(fullFilePath)); // normalize because on windows, the path sometimes is mixing `\` and `/`
+        // shell.openPath(path.normalize(fullFilePath)); // Electron 9
+      } else {
+        event.sender.send('file-not-found');
+      }
+    });
+  });
+
+  /**
+   * Open a particular video file clicked inside Angular at particular timestamp
+   */
+  ipc.on('open-media-file-at-timestamp', (event, executablePath, fullFilePath: string, args: string) => {
+    fs.access(fullFilePath, fs.constants.F_OK, (err: any) => {
+      if (!err) {
+        const cmdline: string = `"${path.normalize(executablePath)}" "${path.normalize(fullFilePath)}" ${args}`;
+        console.log(cmdline);
+        exec(cmdline);
+      } else {
+        event.sender.send('file-not-found');
+      }
+    });
   });
 
   /**
    * Handle dragging a file out of VHA into a video editor (e.g. Vegas or Premiere)
    */
-  ipc.on('drag-video-out-of-electron', (event, filePath): void => {
+  ipc.on('drag-video-out-of-electron', (event, filePath, imgPath): void => {
     console.log(filePath);
     event.sender.startDrag({
       file: filePath,
-      icon: './src/assets/logo.png'
+      icon: imgPath,
+      // icon: './src/assets/logo.png' // <-- local dev if I want the logo instead of thumbnail
+      // icon: './resources/assets/logo.png' // <-- production location (if I copy over the asset correctly in `electron-builder.json`)
     });
-  });
-
-  /**
-   * Open a particular video file clicked inside Angular
-   */
-  ipc.on('open-media-file-at-timestamp', (event, executablePath, fullFilePath: string, args: string) => {
-    const cmdline: string = `"${path.normalize(executablePath)}" "${path.normalize(fullFilePath)}" ${args}`;
-    console.log(cmdline);
-    exec(cmdline);
   });
 
   /**
@@ -142,7 +137,7 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
    * 2. save .pls file
    * 3. ask OS to open the .pls file
    */
-  ipc.on('please-create-playlist', (event, playlist: ImageElement[], sourceFolderMap: InputSources) => {
+  ipc.on('please-create-playlist', (event, playlist: ImageElement[], sourceFolderMap: InputSources, execPath: string) => {
 
     const cleanPlaylist: ImageElement[] = playlist.filter((element: ImageElement) => {
       return element.cleanName !== '*FOLDER*';
@@ -152,8 +147,15 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
 
     if (cleanPlaylist.length) {
       createDotPlsFile(savePath, cleanPlaylist, sourceFolderMap, () => {
-        shell.openItem(savePath);
-        // shell.openPath(savePath); // Electron 9
+
+        if (execPath) { // if `preferredVideoPlayer` is sent
+          const cmdline: string = `"${path.normalize(execPath)}" "${path.normalize(savePath)}"`;
+          console.log(cmdline);
+          exec(cmdline);
+        } else {
+          shell.openItem(savePath);
+          // shell.openPath(savePath); // Electron 9
+        }
       });
     }
   });
@@ -165,27 +167,39 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
     const fileToDelete = path.join(basePath, item.partialPath, item.fileName);
 
     if (dangerousDelete) {
+
       fs.unlink(fileToDelete, (err) => {
         if (err) {
-          console.log(fileToDelete + ' was NOT deleted');
+          console.log('ERROR:', fileToDelete + ' was NOT deleted');
+        } else {
+          notifyFileDeleted(event, fileToDelete, item);
         }
       });
+
     } else {
+
       (async () => {
         await trash(fileToDelete);
+        notifyFileDeleted(event, fileToDelete, item);
       })();
-    }
 
-    // TODO --   handle async stuff better -- maybe wait before checking access?
-    console.log('HANDLE ASYNC STUFF CORRECTLY !?');
-    // check if file exists
-    fs.access(fileToDelete, fs.F_OK, (err: any) => {
+    }
+  });
+
+  /**
+   * Helper function for `delete-video-file`
+   * @param event
+   * @param fileToDelete
+   * @param item
+   */
+  function notifyFileDeleted(event, fileToDelete, item) {
+    fs.access(fileToDelete, fs.constants.F_OK, (err: any) => {
       if (err) {
+        console.log('FILE DELETED SUCCESS !!!')
         event.sender.send('file-deleted', item);
       }
     });
-
-  });
+  }
 
   /**
    * Method to replace thumbnail of a particular item
@@ -198,17 +212,16 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
         item.hash + '.jpg'
       );
 
-    if (fs.existsSync(fileToReplace)) {
-      const height: number = GLOBALS.screenshotSettings.height;
+    const height: number = GLOBALS.screenshotSettings.height;
 
-      replaceThumbnailWithNewImage(fileToReplace, pathToIncomingJpg, height)
-        .then(success => {
-          if (success) {
-            event.sender.send('thumbnail-replaced');
-          }
-        })
-        .catch((err) => {});
-    }
+    replaceThumbnailWithNewImage(fileToReplace, pathToIncomingJpg, height)
+      .then(success => {
+        if (success) {
+          event.sender.send('thumbnail-replaced');
+        }
+      })
+      .catch((err) => {});
+
   });
 
   /**
@@ -262,22 +275,25 @@ export function setUpIpcMessages(ipc, win, pathToAppData, systemMessages) {
    * extract any missing thumbnails
    */
   ipc.on('add-missing-thumbnails', (event, finalArray: ImageElement[], extractClips: boolean) => {
-    const screenshotOutputFolder: string = path.join(GLOBALS.selectedOutputFolder, 'vha-' + GLOBALS.hubName);
-    extractAnyMissingThumbs(finalArray, screenshotOutputFolder, extractClips);
+    extractAnyMissingThumbs(finalArray);
   });
 
   /**
    * Remove any thumbnails for files no longer present in the hub
    */
   ipc.on('clean-old-thumbnails', (event, finalArray: ImageElement[]) => {
+    // !!! WARNING
     const screenshotOutputFolder: string = path.join(GLOBALS.selectedOutputFolder, 'vha-' + GLOBALS.hubName);
+    // !! ^^^^^^^^^^^^^^^^^^^^^^ - make sure this points to the folder with screenshots only!
 
     const allHashes: Map<string, 1> = new Map();
 
-    finalArray.forEach((element: ImageElement) => {
-      allHashes.set(element.hash, 1);
-    });
-    removeThumbnailsNotInHub(allHashes, screenshotOutputFolder);
+    finalArray
+      .filter((element: ImageElement) => { return !element.deleted })
+      .forEach((element: ImageElement) => {
+        allHashes.set(element.hash, 1);
+      });
+    removeThumbnailsNotInHub(allHashes, screenshotOutputFolder); // WARNING !!! this function will delete stuff
   });
 
   /**
